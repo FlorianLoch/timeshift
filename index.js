@@ -3,15 +3,16 @@
   const glob = require("glob");
   // const fs = require('mz/fs');
   const fs = require("fs");
-  const Utimes = require('@ronomon/utimes');
+  const Utimes = require("@ronomon/utimes");
+  const moment = require("moment");
 
   program
     .version(require("./package.json").version)
     .usage("[options] <glob>")
     .option("-h, --hours <n>", "Shift timestamp by n hours")
+    .option("-f, --from_filename", "Get original timestamp from filename")
     .option("--dry", "Dry-run, just lists files that would be modified")
     .parse(process.argv);
-
 
   if (program.hours) {
     await shiftBy(program.hours * 3600);
@@ -33,12 +34,6 @@
 
     const files = glob.sync(globPattern);
 
-    if (program.dry) {
-      console.log("Would shift the timestamps of the following files by " + seconds + " seconds:");
-      console.log(files.reduce((acc, file) => { return acc + file + "\n"; }, ""));
-      return;
-    }
-
     if (files.length == 0) {
       console.log("Your glob pattern did not match any file. Please check this!");
       return;
@@ -46,22 +41,66 @@
 
     console.log(`Going to shift timestamp of ${files.length} files.`);
 
-    for (let file of files) {
-      await shiftTimestampOfFile(file);
+    if (program.dry) {
+      console.log(" ---- DRY-MODE, NOTHING MODIFIED! ---- ");
     }
 
-    async function shiftTimestampOfFile(file) {
+    for (let file of files) {
+      let timestamps;
+
+      if (program.from_filename) {
+        timestamps = parseTimestampsFromFilename(file);
+      }
+      else {
+        timestamps = readTimestampsFromFile(file)
+      }
+
+      const newTimestamps = adjustTimestamps(timestamps);
+
+      if (program.dry) {
+        console.log(file + ":\t\t" + new Date(timestamps.ctimeMs).toUTCString() + " --> " + new Date(newTimestamps.ctimeMs).toUTCString());
+      }
+      else {
+        await shiftTimestampOfFile(file, newTimestamps);
+      }
+    }
+
+    function readTimestampsFromFile(file) {
+      return fs.statSync(file);
+    }
+
+    function parseTimestampsFromFilename(file) {
+      // we expect the following format: JJJJMMDDTHHMMSS as specified by momentjs
+      // we therefore search for this pattern in the filename
+      const match = file.match(/[0-9]{8}T[0-9]{6}/);
+
+      if (match && match.length == 1) {
+        const ts = moment(match[0]);
+        return {
+          atimeMs: ts,
+          mtimeMs: ts,
+          ctimeMs: ts
+        };
+      }
+      else {
+        throw new Error("Could not extract timestamp from filename '" + file + "'");
+      }
+    }
+
+    function adjustTimestamps(timestamps) {
+      const newTimestamps = {};
+
+      newTimestamps.atimeMs = timestamps.atimeMs + seconds * 1000;
+      newTimestamps.mtimeMs = timestamps.mtimeMs + seconds * 1000;
+      newTimestamps.ctimeMs = timestamps.ctimeMs + seconds * 1000;
+
+      return newTimestamps;
+    }
+
+    async function shiftTimestampOfFile(file, timestamps) {
       try {
-        const stat = fs.statSync(file);
-
-        console.log(stat.ctimeMs);
-
-        const newAtime = stat.atimeMs + seconds * 1000;
-        const newMtime = stat.mtimeMs + seconds * 1000;
-        const newCtime = stat.ctimeMs + seconds * 1000;
-
         await new Promise((resolve, reject) => {
-          Utimes.utimes(file, newCtime, newMtime, newAtime, (err) => {
+          Utimes.utimes(file, timestamps.ctimeMs, timestamps.mtimeMs, timestamps.atimeMs, (err) => {
             if (err) {
               reject(err);
               return;
