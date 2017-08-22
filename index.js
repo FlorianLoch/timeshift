@@ -1,3 +1,4 @@
+#! /usr/bin/env node
 (async function () {
   const program = require("commander");
   const glob = require("glob");
@@ -57,10 +58,8 @@
 
       const newTimestamps = adjustTimestamps(timestamps);
 
-      if (program.dry) {
-        console.log(file + ":\t\t" + new Date(timestamps.ctimeMs).toUTCString() + " --> " + new Date(newTimestamps.ctimeMs).toUTCString());
-      }
-      else {
+      console.log(file + ":\t\t" + new Date(timestamps.ctimeMs).toUTCString() + " --> " + new Date(newTimestamps.ctimeMs).toUTCString());
+      if (!program.dry) {
         await shiftTimestampOfFile(file, newTimestamps);
       }
     }
